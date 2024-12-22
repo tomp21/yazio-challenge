@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -47,6 +48,7 @@ const (
 	passwordLetters      = "abcdefghijklmnopqrstuvwxyz"
 	passwordNumbers      = "0123456789"
 	passwordLength       = 12
+	redisImage           = "bitnami/redis"
 )
 
 var CommonLabels = map[string]string{
@@ -73,11 +75,13 @@ type RedisReconciler struct {
 // +kubebuilder:rbac:groups=cache.yazio.com,resources=redis/finalizers,verbs=update
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 // Permissions to manage ServiceAccounts
-//+kubebuilder:rbac:groups="core",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // Permissions to manage Services
-//+kubebuilder:rbac:groups="core",resources=services,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 //Permissions to manage Secrets
-//+kubebuilder:rbac:groups="core",resources=secrets,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
+//Permissions to manage StatefulSets
+//+kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -158,9 +162,9 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 	// For the sake of minimalism on this exercise, i'm leaving out (initially at least)
 	// - NetworkPolicy
 	// - PDBs
-	// This will create:
-	// Redis statefulset
 
+	// Sets this particular intance's common labels
+	// TODO: definitely changing a global variable on runtime is a bad idea, will refactor
 	initLabels(redis)
 
 	//SA
@@ -187,6 +191,11 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 		return ctrl.Result{}, err
 	}
 
+	//Master statefulset
+	fmt.Println("About to create statefulset")
+	if err = r.createOrUpdateMasterSS(ctx, redis); err != nil {
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -293,6 +302,72 @@ func (r *RedisReconciler) manageSecret(ctx context.Context, redis *cachev1alpha1
 		return err
 	}
 	return nil
+}
+
+func (r *RedisReconciler) createOrUpdateMasterSS(ctx context.Context, redis *cachev1alpha1.Redis) error {
+	// hardcoded to 1 since we currently only aim to support single master deployments
+	masterSize := int32(1)
+	labels := extraLabels(MasterLabels)
+	imageFullName := fmt.Sprintf("%s:%s", redisImage, redis.Spec.Version)
+	// Missing
+	// - Security context
+	// - Requests
+	// - Probes
+	statefulSet := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-master", redis.Name),
+			Namespace: redis.Namespace,
+			Labels:    labels,
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: &masterSize,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: labels,
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				Spec: corev1.PodSpec{
+					ServiceAccountName: redis.Name,
+					Containers: []corev1.Container{
+						{
+							Name:  "redis",
+							Image: imageFullName,
+							Env: []corev1.EnvVar{
+								{
+									Name: "REDIS_PASSWORD",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: redis.Name,
+											},
+											// TODO: move this to a constant
+											Key: "redis-password",
+										},
+									},
+								},
+								{
+									Name:  "REDIS_REPLICATION_MODE",
+									Value: "master",
+								},
+							},
+							Ports: []corev1.ContainerPort{
+								{
+									Name:          "redis",
+									ContainerPort: redisPort,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, statefulSet, func() error {
+		return controllerutil.SetControllerReference(redis, statefulSet, r.Scheme)
+	})
+	return err
 }
 
 func generateSecureRedisPassword() string {
