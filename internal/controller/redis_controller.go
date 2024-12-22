@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,8 +35,12 @@ import (
 
 const (
 	conditionAvailable string = "Available"
-	redisFinalizer            = "redis-controller"
+	redisFinalizer            = "redis.yazio.com"
 )
+
+var CommonLabels = map[string]string{
+	"app.kubernetes.io/managed-by": "redis-operator",
+}
 
 // RedisReconciler reconciles a Redis object
 type RedisReconciler struct {
@@ -46,6 +51,9 @@ type RedisReconciler struct {
 // +kubebuilder:rbac:groups=cache.yazio.com,resources=redis,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cache.yazio.com,resources=redis/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=cache.yazio.com,resources=redis/finalizers,verbs=update
+//+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+// Permissions to manage ServiceAccounts
+//+kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -113,20 +121,50 @@ func (r *RedisReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 func (r *RedisReconciler) handleFinalizer(ctx context.Context, redis *cachev1alpha1.Redis) (ctrl.Result, error) {
 	// TODO
+	log.Log.Info(fmt.Sprintf("Deleting resource %v/%v", redis.Namespace, redis.Name))
+	controllerutil.RemoveFinalizer(redis, redisFinalizer)
+	err := r.Update(ctx, redis)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
 }
 
 func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev1alpha1.Redis) (ctrl.Result, error) {
 	// For the sake of minimalism on this exercise, i'm leaving out (initially at least)
 	// - NetworkPolicy
+	// - PDBs
 	//
 	// This will create:
 	// PVCs
-	// Redis statefulset
 	// Secret
-	// Service to access Redis
+	// Service to access Redis master
 	// ServiceAccount
+	// Redis statefulset
 	// ..?
 
+	//SA
+	err := r.createOrUpdateServiceAccount(ctx, redis)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
+}
+
+func (r *RedisReconciler) createOrUpdateServiceAccount(ctx context.Context, redis *cachev1alpha1.Redis) error {
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      redis.Name,
+			Namespace: redis.Namespace,
+			Labels:    CommonLabels,
+		},
+	}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, sa, func() error {
+		return controllerutil.SetControllerReference(redis, sa, r.Scheme)
+	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
