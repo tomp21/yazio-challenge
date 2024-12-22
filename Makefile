@@ -328,6 +328,7 @@ catalog-push: ## Push a catalog image.
 kind-refresh: 
 	$(MAKE) docker-build
 	$(KIND) load docker-image $(IMG)
+	$(MAKE) manifests
 	$(MAKE) deploy
 	$(KUBECTL) delete po -l control-plane=controller-manager -n yazio-challenge-system
 

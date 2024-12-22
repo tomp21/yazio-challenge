@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -36,10 +37,21 @@ import (
 const (
 	conditionAvailable string = "Available"
 	redisFinalizer            = "redis.yazio.com"
+	redisPortName             = "redis"
+	redisPort                 = 6379
 )
 
 var CommonLabels = map[string]string{
 	"app.kubernetes.io/managed-by": "redis-operator",
+	"app.kubernetes.io/name":       "redis",
+}
+
+var MasterLabels = map[string]string{
+	"app.kubernetes.io/component": "master",
+}
+
+var ReplicaLabels = map[string]string{
+	"app.kubernetes.io/component": "replica",
 }
 
 // RedisReconciler reconciles a Redis object
@@ -53,7 +65,9 @@ type RedisReconciler struct {
 // +kubebuilder:rbac:groups=cache.yazio.com,resources=redis/finalizers,verbs=update
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 // Permissions to manage ServiceAccounts
-//+kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="core",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+// Permissions to manage Services
+//+kubebuilder:rbac:groups="core",resources=services,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -119,8 +133,8 @@ func (r *RedisReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // Non-boilerplate functions
 
+// Handles removal of finalizer, to be triggered on deletion, and if extra events need to be triggered on deletion, this is where to do so
 func (r *RedisReconciler) handleFinalizer(ctx context.Context, redis *cachev1alpha1.Redis) (ctrl.Result, error) {
-	// TODO
 	log.Log.Info(fmt.Sprintf("Deleting resource %v/%v", redis.Namespace, redis.Name))
 	controllerutil.RemoveFinalizer(redis, redisFinalizer)
 	err := r.Update(ctx, redis)
@@ -138,14 +152,27 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 	// This will create:
 	// PVCs
 	// Secret
-	// Service to access Redis master
-	// ServiceAccount
 	// Redis statefulset
 	// ..?
+
+	initLabels(redis)
 
 	//SA
 	err := r.createOrUpdateServiceAccount(ctx, redis)
 	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	//Master service
+	if err = r.createOrUpdateMasterService(ctx, redis); err != nil {
+		return ctrl.Result{}, err
+	}
+	//Replicas service
+	if err = r.createOrUpdateReplicasService(ctx, redis); err != nil {
+		return ctrl.Result{}, err
+	}
+	//Headless service
+	if err = r.createOrUpdateHeadlessService(ctx, redis); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -163,8 +190,70 @@ func (r *RedisReconciler) createOrUpdateServiceAccount(ctx context.Context, redi
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, sa, func() error {
 		return controllerutil.SetControllerReference(redis, sa, r.Scheme)
 	})
-	if err != nil {
-		return err
+	return err
+}
+
+func (r *RedisReconciler) createOrUpdateMasterService(ctx context.Context, redis *cachev1alpha1.Redis) error {
+	labels := extraLabels(MasterLabels)
+	svcName := fmt.Sprintf("%s-master", redis.Name)
+	svc := generateRedisService(labels, svcName, redis.Namespace)
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
+		return controllerutil.SetControllerReference(redis, svc, r.Scheme)
+	})
+	return err
+}
+
+func (r *RedisReconciler) createOrUpdateReplicasService(ctx context.Context, redis *cachev1alpha1.Redis) error {
+	labels := extraLabels(ReplicaLabels)
+	svcName := fmt.Sprintf("%s-replicas", redis.Name)
+	svc := generateRedisService(labels, svcName, redis.Namespace)
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
+		return controllerutil.SetControllerReference(redis, svc, r.Scheme)
+	})
+	return err
+}
+
+func (r *RedisReconciler) createOrUpdateHeadlessService(ctx context.Context, redis *cachev1alpha1.Redis) error {
+	svcName := fmt.Sprintf("%s-headless", redis.Name)
+	svc := generateRedisService(CommonLabels, svcName, redis.Namespace)
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
+		return controllerutil.SetControllerReference(redis, svc, r.Scheme)
+	})
+	return err
+}
+
+func extraLabels(extras map[string]string) map[string]string {
+	for k, v := range CommonLabels {
+		extras[k] = v
 	}
-	return nil
+	return extras
+}
+
+// This method is intended to add any dynamic values to the `CommonLabels` map, for now only the instance identifier
+func initLabels(redis *cachev1alpha1.Redis) {
+	// this label helps us differentiate and avoid collisions on label selectors with other hypothetical redises in the same ns
+	CommonLabels["app.kubernetes.io/instance"] = redis.Name
+}
+
+func generateRedisService(labels map[string]string, name string, namespace string) *corev1.Service {
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    labels,
+		},
+		Spec: corev1.ServiceSpec{
+			Type: "ClusterIP",
+			Ports: []corev1.ServicePort{
+				{
+					Name:       "tcp-redis",
+					Port:       redisPort,
+					TargetPort: intstr.FromString(redisPortName),
+				},
+			},
+			Selector: labels,
+		},
+	}
 }
