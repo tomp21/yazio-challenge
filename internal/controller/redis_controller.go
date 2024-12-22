@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -42,16 +43,16 @@ import (
 )
 
 const (
-	conditionAvailable string = "Available"
-	redisFinalizer            = "redis.yazio.com"
-	redisPortName             = "redis"
-	redisPort                 = 6379
-	//TODO check if any of these characters can cause issues when composing connection strings
-	passwordSpecialChars = "!@#$%^&*()_+-=[]{};':,./?~"
-	passwordLetters      = "abcdefghijklmnopqrstuvwxyz"
-	passwordNumbers      = "0123456789"
-	passwordLength       = 12
-	redisImage           = "bitnami/redis"
+	conditionAvailable     string = "Available"
+	redisFinalizer                = "redis.yazio.com"
+	redisPortName                 = "redis"
+	redisPort                     = 6379
+	passwordSpecialChars          = "!@#$%^&*()_+-=[]{};':,./?~"
+	passwordLetters               = "abcdefghijklmnopqrstuvwxyz"
+	passwordNumbers               = "0123456789"
+	passwordLength                = 12
+	redisImage                    = "bitnami/redis"
+	redisPasswordSecretKey        = "redis-password"
 )
 
 var CommonLabels = map[string]string{
@@ -85,12 +86,13 @@ var redisReplicaConf string
 // RedisReconciler reconciles a Redis object
 type RedisReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
-// +kubebuilder:rbac:groups=cache.yazio.com,resources=redis,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=cache.yazio.com,resources=redis/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=cache.yazio.com,resources=redis/finalizers,verbs=update
+//+kubebuilder:rbac:groups=cache.yazio.com,resources=redis,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=cache.yazio.com,resources=redis/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=cache.yazio.com,resources=redis/finalizers,verbs=update
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 // Permissions to manage ServiceAccounts
 //+kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
@@ -105,16 +107,9 @@ type RedisReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the Redis object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.18.4/pkg/reconcile
 func (r *RedisReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
-
+	fmt.Println("Reconcile triggered")
 	redis := &cachev1alpha1.Redis{}
 
 	err := r.Get(ctx, req.NamespacedName, redis)
@@ -162,6 +157,11 @@ func (r *RedisReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 func (r *RedisReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&cachev1alpha1.Redis{}).
+		Owns(&appsv1.StatefulSet{}).
+		Owns(&corev1.ServiceAccount{}).
+		Owns(&corev1.Secret{}).
+		Owns(&corev1.ConfigMap{}).
+		Owns(&corev1.Service{}).
 		Complete(r)
 }
 
@@ -308,7 +308,6 @@ func generateRedisService(labels map[string]string, name string, namespace strin
 
 // Known issue: if the secret was edited and the redis-secret field no longer exist, but the secret itself is there, we are not fixing it
 func (r *RedisReconciler) manageSecret(ctx context.Context, redis *cachev1alpha1.Redis) error {
-	log.Log.Info("Reconciling!")
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      redis.Name,
@@ -324,7 +323,7 @@ func (r *RedisReconciler) manageSecret(ctx context.Context, redis *cachev1alpha1
 	err := r.Get(ctx, namespacedName, secret)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			secret.StringData = map[string]string{"redis-password": password}
+			secret.StringData = map[string]string{redisPasswordSecretKey: password}
 			controllerutil.SetControllerReference(redis, secret, r.Scheme)
 			return r.Create(ctx, secret)
 		}
@@ -378,8 +377,7 @@ func (r *RedisReconciler) createOrUpdateMasterSS(ctx context.Context, redis *cac
 											LocalObjectReference: corev1.LocalObjectReference{
 												Name: redis.Name,
 											},
-											// TODO: move this to a constant
-											Key: "redis-password",
+											Key: redisPasswordSecretKey,
 										},
 									},
 								},
@@ -438,39 +436,42 @@ func (r *RedisReconciler) createOrUpdateMasterSS(ctx context.Context, redis *cac
 					},
 				},
 			},
-			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
-				{
-					TypeMeta: metav1.TypeMeta{
-						APIVersion: "v1",
-						Kind:       "PersistentVolumeClaim",
+		},
+	}
+	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, statefulSet, func() error {
+		statefulSet.Spec.Template.Spec.Containers[0].Image = imageFullName
+		statefulSet.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{
+			{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: "v1",
+					Kind:       "PersistentVolumeClaim",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   fmt.Sprintf("%s-data", redis.Name),
+					Labels: CommonLabels,
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{
+						corev1.ReadWriteOnce,
 					},
-					ObjectMeta: metav1.ObjectMeta{
-						Name:   fmt.Sprintf("%s-data", redis.Name),
-						Labels: CommonLabels,
-					},
-					Spec: corev1.PersistentVolumeClaimSpec{
-						AccessModes: []corev1.PersistentVolumeAccessMode{
-							corev1.ReadWriteOnce,
-						},
-						Resources: corev1.VolumeResourceRequirements{
-							Requests: corev1.ResourceList{
-								//TODO: make this configurable
-								corev1.ResourceStorage: volumeStorage,
-							},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceStorage: volumeStorage,
 						},
 					},
 				},
 			},
-		},
-	}
-	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, statefulSet, func() error {
+		}
 		return controllerutil.SetControllerReference(redis, statefulSet, r.Scheme)
 	})
+
 	return err
 }
 
 func (r *RedisReconciler) createOrUpdateReplicasSS(ctx context.Context, redis *cachev1alpha1.Redis) error {
 	replicas := redis.Spec.Replicas
+	fmt.Println("replicas")
+	fmt.Println(replicas)
 	defaultCMMode := int32(0755)
 	volumeStorage, err := resource.ParseQuantity("2Gi")
 	if err != nil {
@@ -513,8 +514,7 @@ func (r *RedisReconciler) createOrUpdateReplicasSS(ctx context.Context, redis *c
 											LocalObjectReference: corev1.LocalObjectReference{
 												Name: redis.Name,
 											},
-											// TODO: move this to a constant
-											Key: "redis-password",
+											Key: redisPasswordSecretKey,
 										},
 									},
 								},
@@ -581,32 +581,33 @@ func (r *RedisReconciler) createOrUpdateReplicasSS(ctx context.Context, redis *c
 					},
 				},
 			},
-			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
-				{
-					TypeMeta: metav1.TypeMeta{
-						APIVersion: "v1",
-						Kind:       "PersistentVolumeClaim",
+		},
+	}
+	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, statefulSet, func() error {
+		statefulSet.Spec.Replicas = &replicas
+		statefulSet.Spec.Template.Spec.Containers[0].Image = imageFullName
+		statefulSet.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{
+			{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: "v1",
+					Kind:       "PersistentVolumeClaim",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   fmt.Sprintf("%s-data", redis.Name),
+					Labels: CommonLabels,
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{
+						corev1.ReadWriteOnce,
 					},
-					ObjectMeta: metav1.ObjectMeta{
-						Name:   fmt.Sprintf("%s-data", redis.Name),
-						Labels: CommonLabels,
-					},
-					Spec: corev1.PersistentVolumeClaimSpec{
-						AccessModes: []corev1.PersistentVolumeAccessMode{
-							corev1.ReadWriteOnce,
-						},
-						Resources: corev1.VolumeResourceRequirements{
-							Requests: corev1.ResourceList{
-								//TODO: make this configurable
-								corev1.ResourceStorage: volumeStorage,
-							},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceStorage: volumeStorage,
 						},
 					},
 				},
 			},
-		},
-	}
-	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, statefulSet, func() error {
+		}
 		return controllerutil.SetControllerReference(redis, statefulSet, r.Scheme)
 	})
 	return err

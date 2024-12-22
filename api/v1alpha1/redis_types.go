@@ -25,9 +25,10 @@ import (
 type RedisSpec struct {
 
 	// +kubebuilder:validation:Minimum=1
-	Replicas int32             `json:"replicas,omitempty"`
-	Memory   resource.Quantity `json:"memory,omitempty"`
-	Version  string            `json:"version,omitempty"`
+	Replicas      int32             `json:"replicas,omitempty"`
+	Memory        resource.Quantity `json:"memory,omitempty"`
+	Version       string            `json:"version,omitempty"`
+	VolumeStorage resource.Quantity `json:"volumeStorage,omitempty"`
 }
 
 // RedisStatus defines the observed state of Redis

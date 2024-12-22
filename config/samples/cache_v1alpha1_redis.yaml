@@ -9,3 +9,4 @@ spec:
    replicas: 3
    memory: 2G
    version: "7.4.1"
+   volumeStorage: 2Gi
