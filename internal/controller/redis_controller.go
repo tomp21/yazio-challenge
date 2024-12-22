@@ -70,11 +70,17 @@ var ReplicaLabels = map[string]string{
 //go:embed configmaps/scripts/start-master.sh
 var masterStartScript string
 
+//go:embed configmaps/scripts/start-replica.sh
+var replicaStartScript string
+
 //go:embed configmaps/conf/redis.conf
 var redisAllConf string
 
 //go:embed configmaps/conf/master.conf
 var redisMasterConf string
+
+//go:embed configmaps/conf/master.conf
+var redisReplicaConf string
 
 // RedisReconciler reconciles a Redis object
 type RedisReconciler struct {
@@ -214,6 +220,10 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 	if err = r.createOrUpdateMasterSS(ctx, redis); err != nil {
 		return ctrl.Result{}, err
 	}
+	//Replicas statefulset
+	if err = r.createOrUpdateReplicasSS(ctx, redis); err != nil {
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -298,6 +308,7 @@ func generateRedisService(labels map[string]string, name string, namespace strin
 
 // Known issue: if the secret was edited and the redis-secret field no longer exist, but the secret itself is there, we are not fixing it
 func (r *RedisReconciler) manageSecret(ctx context.Context, redis *cachev1alpha1.Redis) error {
+	log.Log.Info("Reconciling!")
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      redis.Name,
@@ -458,6 +469,149 @@ func (r *RedisReconciler) createOrUpdateMasterSS(ctx context.Context, redis *cac
 	return err
 }
 
+func (r *RedisReconciler) createOrUpdateReplicasSS(ctx context.Context, redis *cachev1alpha1.Redis) error {
+	replicas := redis.Spec.Replicas
+	defaultCMMode := int32(0755)
+	volumeStorage, err := resource.ParseQuantity("2Gi")
+	if err != nil {
+		return err
+	}
+	labels := extraLabels(MasterLabels)
+	imageFullName := fmt.Sprintf("%s:%s", redisImage, redis.Spec.Version)
+	// Missing
+	// - Security context
+	// - Requests
+	// - Probes
+	statefulSet := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-replica", redis.Name),
+			Namespace: redis.Namespace,
+			Labels:    labels,
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: labels,
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				Spec: corev1.PodSpec{
+					ServiceAccountName: redis.Name,
+					Containers: []corev1.Container{
+						{
+							Name:    "redis",
+							Image:   imageFullName,
+							Command: []string{"/bin/bash"},
+							Args:    []string{"-c", "/opt/bitnami/scripts/start-scripts/start-replica.sh"},
+							Env: []corev1.EnvVar{
+								{
+									Name: "REDIS_PASSWORD",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: redis.Name,
+											},
+											// TODO: move this to a constant
+											Key: "redis-password",
+										},
+									},
+								},
+								{
+									Name:  "REDIS_REPLICATION_MODE",
+									Value: "replica",
+								},
+								{
+									Name:  "REDIS_MASTER_HOST",
+									Value: fmt.Sprintf("%s-master", redis.Name),
+								},
+								{
+									Name:  "REDIS_PORT",
+									Value: strconv.Itoa(redisPort),
+								},
+								{
+									Name:  "HEADLESS_SERVICE",
+									Value: fmt.Sprintf("%s-headless", redis.Name),
+								},
+							},
+							Ports: []corev1.ContainerPort{
+								{
+									Name:          "redis",
+									ContainerPort: redisPort,
+								},
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "start-scripts",
+									MountPath: "/opt/bitnami/scripts/start-scripts",
+								}, {
+									Name:      "redis-conf",
+									MountPath: "/opt/bitnami/redis/mounted-etc",
+								},
+								{
+									Name:      fmt.Sprintf("%s-data", redis.Name),
+									MountPath: "/data",
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "start-scripts",
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: "start-scripts",
+									},
+									DefaultMode: &defaultCMMode,
+								},
+							},
+						}, {
+							Name: "redis-conf",
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: "redis-conf",
+									},
+									DefaultMode: &defaultCMMode,
+								},
+							},
+						},
+					},
+				},
+			},
+			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
+				{
+					TypeMeta: metav1.TypeMeta{
+						APIVersion: "v1",
+						Kind:       "PersistentVolumeClaim",
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   fmt.Sprintf("%s-data", redis.Name),
+						Labels: CommonLabels,
+					},
+					Spec: corev1.PersistentVolumeClaimSpec{
+						AccessModes: []corev1.PersistentVolumeAccessMode{
+							corev1.ReadWriteOnce,
+						},
+						Resources: corev1.VolumeResourceRequirements{
+							Requests: corev1.ResourceList{
+								//TODO: make this configurable
+								corev1.ResourceStorage: volumeStorage,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, statefulSet, func() error {
+		return controllerutil.SetControllerReference(redis, statefulSet, r.Scheme)
+	})
+	return err
+}
+
 func (r *RedisReconciler) createOrUpdateConfigMaps(ctx context.Context, redis *cachev1alpha1.Redis) error {
 
 	cmStartScripts := &corev1.ConfigMap{
@@ -467,7 +621,8 @@ func (r *RedisReconciler) createOrUpdateConfigMaps(ctx context.Context, redis *c
 			Labels:    CommonLabels,
 		},
 		Data: map[string]string{
-			"start-master.sh": string(masterStartScript),
+			"start-master.sh":  masterStartScript,
+			"start-replica.sh": replicaStartScript,
 		},
 	}
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, cmStartScripts, func() error {
@@ -484,8 +639,9 @@ func (r *RedisReconciler) createOrUpdateConfigMaps(ctx context.Context, redis *c
 			Labels:    CommonLabels,
 		},
 		Data: map[string]string{
-			"redis.conf":  string(redisAllConf),
-			"master.conf": string(redisMasterConf),
+			"redis.conf":   redisAllConf,
+			"master.conf":  redisMasterConf,
+			"replica.conf": redisReplicaConf,
 		},
 	}
 
