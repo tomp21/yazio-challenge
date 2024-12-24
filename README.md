@@ -22,6 +22,12 @@ This repository holds the code for an operator responsible of managing a Redis s
 
 Knowing our kubectl context is pointing to the cluster we want to deploy the operator to:
 
+## Deployment using installer without cloning the repository
+```
+kubectl apply -f https://raw.githubusercontent.com/tomp21/yazio-challenge/main/dist/install.yaml
+```
+
+## Deployment manually creating operator components
 
 **Install the CRDs into the cluster:**
 
@@ -35,10 +41,24 @@ make install
 make deploy IMG=ghcr.io/tomp21/yazio-challenge:main
 ```
 
+And you will be ready to go!
+
 > **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
 privileges or be logged in as admin.
 
-**Create redis instances**
+**Delete the APIs(CRDs) from the cluster:**
+
+```sh
+make uninstall
+```
+
+**UnDeploy the controller from the cluster:**
+
+```sh
+make undeploy
+```
+
+### Creating a sample Redis instance 
 You can apply the sample the config/sample:
 
 ```sh
@@ -56,18 +76,6 @@ If you renamed the resource after creation, you will need to delete it referncin
 kubectl delete redis <whichever name you set to it>
 ```
 
-**Delete the APIs(CRDs) from the cluster:**
-
-```sh
-make uninstall
-```
-
-**UnDeploy the controller from the cluster:**
-
-```sh
-make undeploy
-```
-
 ## Project Distribution
 
 Following are the steps to build the installer and distribute this project to users.
@@ -75,21 +83,13 @@ Following are the steps to build the installer and distribute this project to us
 1. Build the installer for the image built and published in the registry:
 
 ```sh
-make build-installer IMG=<some-registry>/yazio-challenge:tag
+make build-installer IMG=ghcr.io/tomp21/yazio-challenge:main
 ```
 
 NOTE: The makefile target mentioned above generates an 'install.yaml'
 file in the dist directory. This file contains all the resources built
 with Kustomize, which are necessary to install this project without
 its dependencies.
-
-2. Using the installer
-
-Users can just run kubectl apply -f <URL for YAML BUNDLE> to install the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/yazio-challenge/<tag or branch>/dist/install.yaml
-```
 
 ## License
 
