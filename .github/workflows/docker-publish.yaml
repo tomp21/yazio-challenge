@@ -32,6 +32,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=sha
+            type=ref,event=branch
         env:
           DOCKER_METADATA_SHORT_SHA_LENGTH: 6
       - name: Build and push Docker image
