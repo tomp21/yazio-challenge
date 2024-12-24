@@ -1,8 +1,14 @@
 # yazio-challenge
-// TODO(user): Add simple overview of use/purpose
-
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+This repository holds the code for an operator responsible of managing a Redis single-master deployment, following the challenge proposed features:
+- Manage Redis instances
+- CRD Definition (Which can be found at TODO:link CRD here)
+- Random password generation
+- Secret management
+- Redis deployment (Turned statefulsets due to the application's nature)
+- Update and delete operations
+- Documentation (This file will contain all required information or links to it)
+- (Bonus) Basic tests
+- (Bonus) Health watch mechanism/self healing capacity
 
 ## Getting Started
 
@@ -10,18 +16,12 @@
 - go version v1.22.0+
 - docker version 17.03+.
 - kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+- Access to a Kubernetes v1.11.3+ cluster. ([kind](https://kind.sigs.k8s.io/) is recommended for local testing, as it was used for development)
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+### Deployment steps
 
-```sh
-make docker-build docker-push IMG=<some-registry>/yazio-challenge:tag
-```
+Knowing our kubectl context is pointing to the cluster we want to deploy the operator to:
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
 
 **Install the CRDs into the cluster:**
 
@@ -32,26 +32,28 @@ make install
 **Deploy the Manager to the cluster with the image specified by `IMG`:**
 
 ```sh
-make deploy IMG=<some-registry>/yazio-challenge:tag
+make deploy IMG=ghcr.io/tomp21/yazio-challenge:main
 ```
 
 > **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
 privileges or be logged in as admin.
 
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
+**Create redis instances**
+You can apply the sample the config/sample:
 
 ```sh
-kubectl apply -k config/samples/
+kubectl apply -k config/samples/cache_v1alpha1_redis.yaml
 ```
-
->**NOTE**: Ensure that the samples has default values to test it out.
 
 ### To Uninstall
 **Delete the instances (CRs) from the cluster:**
+```sh
+kubectl delete -k config/samples/cache_v1alpha1_redis.yaml
+```
+If you renamed the resource after creation, you will need to delete it referncing its new name:
 
 ```sh
-kubectl delete -k config/samples/
+kubectl delete redis <whichever name you set to it>
 ```
 
 **Delete the APIs(CRDs) from the cluster:**
@@ -88,13 +90,6 @@ Users can just run kubectl apply -f <URL for YAML BUNDLE> to install the project
 ```sh
 kubectl apply -f https://raw.githubusercontent.com/<org>/yazio-challenge/<tag or branch>/dist/install.yaml
 ```
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
 ## License
 
