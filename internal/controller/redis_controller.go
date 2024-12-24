@@ -43,19 +43,19 @@ import (
 )
 
 const (
-	conditionAvailable     string = "Available"
-	redisFinalizer                = "redis.yazio.com"
-	redisPortName                 = "redis"
-	redisPort                     = 6379
-	passwordSpecialChars          = "!@#$%^&*()_+-=[]{};':,./?~"
-	passwordLetters               = "abcdefghijklmnopqrstuvwxyz"
-	passwordNumbers               = "0123456789"
-	passwordLength                = 12
-	redisImage                    = "bitnami/redis"
-	redisPasswordSecretKey        = "redis-password"
+	conditionAvailable     = "Available"
+	redisFinalizer         = "redis.yazio.com"
+	redisPortName          = "redis"
+	redisPort              = 6379
+	passwordSpecialChars   = "!@#$%^&*()_+-=[]{};':,./?~"
+	passwordLetters        = "abcdefghijklmnopqrstuvwxyz"
+	passwordNumbers        = "0123456789"
+	passwordLength         = 12
+	redisImage             = "bitnami/redis"
+	redisPasswordSecretKey = "redis-password"
 )
 
-var CommonLabels = map[string]string{
+var BaseLabels = map[string]string{
 	"app.kubernetes.io/managed-by": "redis-operator",
 	"app.kubernetes.io/name":       "redis",
 }
@@ -183,10 +183,6 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 	// - NetworkPolicy
 	// - PDBs
 
-	// Sets this particular intance's common labels
-	// TODO: definitely changing a global variable on runtime is a bad idea, will refactor
-	initLabels(redis)
-
 	//SA
 	err := r.createOrUpdateServiceAccount(ctx, redis)
 	if err != nil {
@@ -232,7 +228,7 @@ func (r *RedisReconciler) createOrUpdateServiceAccount(ctx context.Context, redi
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      redis.Name,
 			Namespace: redis.Namespace,
-			Labels:    CommonLabels,
+			Labels:    getLabels(redis, nil),
 		},
 	}
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, sa, func() error {
@@ -242,7 +238,7 @@ func (r *RedisReconciler) createOrUpdateServiceAccount(ctx context.Context, redi
 }
 
 func (r *RedisReconciler) createOrUpdateMasterService(ctx context.Context, redis *cachev1alpha1.Redis) error {
-	labels := extraLabels(MasterLabels)
+	labels := getLabels(redis, MasterLabels)
 	svcName := fmt.Sprintf("%s-master", redis.Name)
 	svc := generateRedisService(labels, svcName, redis.Namespace)
 
@@ -253,7 +249,7 @@ func (r *RedisReconciler) createOrUpdateMasterService(ctx context.Context, redis
 }
 
 func (r *RedisReconciler) createOrUpdateReplicasService(ctx context.Context, redis *cachev1alpha1.Redis) error {
-	labels := extraLabels(ReplicaLabels)
+	labels := getLabels(redis, ReplicaLabels)
 	svcName := fmt.Sprintf("%s-replicas", redis.Name)
 	svc := generateRedisService(labels, svcName, redis.Namespace)
 
@@ -265,24 +261,26 @@ func (r *RedisReconciler) createOrUpdateReplicasService(ctx context.Context, red
 
 func (r *RedisReconciler) createOrUpdateHeadlessService(ctx context.Context, redis *cachev1alpha1.Redis) error {
 	svcName := fmt.Sprintf("%s-headless", redis.Name)
-	svc := generateRedisService(CommonLabels, svcName, redis.Namespace)
+	svc := generateRedisService(getLabels(redis, nil), svcName, redis.Namespace)
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
 		return controllerutil.SetControllerReference(redis, svc, r.Scheme)
 	})
 	return err
 }
 
-func extraLabels(extras map[string]string) map[string]string {
-	for k, v := range CommonLabels {
-		extras[k] = v
+func getLabels(redis *cachev1alpha1.Redis, extra map[string]string) map[string]string {
+	labels := make(map[string]string)
+	for k, v := range BaseLabels {
+		labels[k] = v
 	}
-	return extras
-}
-
-// This method is intended to add any dynamic values to the `CommonLabels` map, for now only the instance identifier
-func initLabels(redis *cachev1alpha1.Redis) {
 	// this label helps us differentiate and avoid collisions on label selectors with other hypothetical redises in the same ns
-	CommonLabels["app.kubernetes.io/instance"] = redis.Name
+	labels["app.kubernetes.io/instance"] = redis.Name
+	if extra != nil {
+		for k, v := range extra {
+			labels[k] = v
+		}
+	}
+	return labels
 }
 
 func generateRedisService(labels map[string]string, name string, namespace string) *corev1.Service {
@@ -312,7 +310,7 @@ func (r *RedisReconciler) manageSecret(ctx context.Context, redis *cachev1alpha1
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      redis.Name,
 			Namespace: redis.Namespace,
-			Labels:    CommonLabels,
+			Labels:    getLabels(redis, nil),
 		},
 	}
 	namespacedName := types.NamespacedName{
@@ -340,7 +338,7 @@ func (r *RedisReconciler) createOrUpdateMasterSS(ctx context.Context, redis *cac
 	if err != nil {
 		return err
 	}
-	labels := extraLabels(MasterLabels)
+	labels := getLabels(redis, MasterLabels)
 	imageFullName := fmt.Sprintf("%s:%s", redisImage, redis.Spec.Version)
 	// Missing
 	// - Security context
@@ -448,7 +446,7 @@ func (r *RedisReconciler) createOrUpdateMasterSS(ctx context.Context, redis *cac
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:   fmt.Sprintf("%s-data", redis.Name),
-					Labels: CommonLabels,
+					Labels: getLabels(redis, nil),
 				},
 				Spec: corev1.PersistentVolumeClaimSpec{
 					AccessModes: []corev1.PersistentVolumeAccessMode{
@@ -477,7 +475,7 @@ func (r *RedisReconciler) createOrUpdateReplicasSS(ctx context.Context, redis *c
 	if err != nil {
 		return err
 	}
-	labels := extraLabels(MasterLabels)
+	labels := getLabels(redis, MasterLabels)
 	imageFullName := fmt.Sprintf("%s:%s", redisImage, redis.Spec.Version)
 	// Missing
 	// - Security context
@@ -594,7 +592,7 @@ func (r *RedisReconciler) createOrUpdateReplicasSS(ctx context.Context, redis *c
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:   fmt.Sprintf("%s-data", redis.Name),
-					Labels: CommonLabels,
+					Labels: getLabels(redis, nil),
 				},
 				Spec: corev1.PersistentVolumeClaimSpec{
 					AccessModes: []corev1.PersistentVolumeAccessMode{
@@ -619,7 +617,7 @@ func (r *RedisReconciler) createOrUpdateConfigMaps(ctx context.Context, redis *c
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "start-scripts",
 			Namespace: redis.Namespace,
-			Labels:    CommonLabels,
+			Labels:    getLabels(redis, nil),
 		},
 		Data: map[string]string{
 			"start-master.sh":  masterStartScript,
@@ -637,7 +635,7 @@ func (r *RedisReconciler) createOrUpdateConfigMaps(ctx context.Context, redis *c
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "redis-conf",
 			Namespace: redis.Namespace,
-			Labels:    CommonLabels,
+			Labels:    getLabels(redis, nil),
 		},
 		Data: map[string]string{
 			"redis.conf":   redisAllConf,
