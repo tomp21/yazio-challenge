@@ -17,11 +17,9 @@ limitations under the License.
 package controller
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
-	"math/rand/v2"
 	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -31,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -45,19 +42,14 @@ import (
 )
 
 const (
-	conditionAvailable     = "Available"
-	redisFinalizer         = "redis.yazio.com"
-	redisPortName          = "redis"
-	redisPort              = 6379
-	passwordSpecialChars   = "!@#$%^&*()_+-=[]{};':,./?~"
-	passwordLetters        = "abcdefghijklmnopqrstuvwxyz"
-	passwordNumbers        = "0123456789"
-	passwordLength         = 12
-	redisImage             = "bitnami/redis"
-	redisPasswordSecretKey = "redis-password"
-	defaultMemoryRequest   = "512Mi"
-	defaultCpuRequest      = "100m"
-	defaultMemoryLimit     = "512Mi"
+	conditionAvailable   = "Available"
+	redisFinalizer       = "redis.yazio.com"
+	redisPortName        = "redis"
+	redisPort            = 6379
+	redisImage           = "bitnami/redis"
+	defaultMemoryRequest = "512Mi"
+	defaultCpuRequest    = "100m"
+	defaultMemoryLimit   = "512Mi"
 )
 
 var masterLabels = map[string]string{
@@ -218,7 +210,8 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 	}
 
 	//Secret
-	if err = r.manageSecret(ctx, redis); err != nil {
+	secretReconciler := reconcilers.NewSecretReconciler(r.Client, r.Scheme)
+	if err = secretReconciler.Reconcile(ctx, redis); err != nil {
 		return err
 	}
 
@@ -290,32 +283,6 @@ func generateRedisService(labels map[string]string, name string, namespace strin
 	}
 }
 
-// Known issue: if the secret was edited and the redis-secret field no longer exist, but the secret itself is there, we are not fixing it
-func (r *RedisReconciler) manageSecret(ctx context.Context, redis *cachev1alpha1.Redis) error {
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      redis.Name,
-			Namespace: redis.Namespace,
-			Labels:    util.GetLabels(redis, nil),
-		},
-	}
-	namespacedName := types.NamespacedName{
-		Name:      redis.Name,
-		Namespace: redis.Namespace,
-	}
-	password := generateSecureRedisPassword()
-	err := r.Get(ctx, namespacedName, secret)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			secret.StringData = map[string]string{redisPasswordSecretKey: password}
-			controllerutil.SetControllerReference(redis, secret, r.Scheme)
-			return r.Create(ctx, secret)
-		}
-		return err
-	}
-	return nil
-}
-
 func (r *RedisReconciler) createOrUpdateMasterSS(ctx context.Context, redis *cachev1alpha1.Redis) error {
 	// hardcoded to 1 since we currently only aim to support single master deployments
 	masterSize := int32(1)
@@ -361,7 +328,7 @@ func (r *RedisReconciler) createOrUpdateMasterSS(ctx context.Context, redis *cac
 											LocalObjectReference: corev1.LocalObjectReference{
 												Name: redis.Name,
 											},
-											Key: redisPasswordSecretKey,
+											Key: reconcilers.PasswordSecretKey,
 										},
 									},
 								},
@@ -499,7 +466,7 @@ func (r *RedisReconciler) createOrUpdateReplicasSS(ctx context.Context, redis *c
 											LocalObjectReference: corev1.LocalObjectReference{
 												Name: redis.Name,
 											},
-											Key: redisPasswordSecretKey,
+											Key: reconcilers.PasswordSecretKey,
 										},
 									},
 								},
@@ -654,23 +621,4 @@ func getResources() corev1.ResourceRequirements {
 			corev1.ResourceMemory: resource.MustParse(defaultMemoryLimit),
 		},
 	}
-}
-
-func generateSecureRedisPassword() string {
-	var password []byte
-	//TODO improve this, it works fine but the code is ugly and will only have 1 uppercase character, though it is good enough for now
-	// Though it ensures it has at least 1 upppercase char, 1 lowercase char and a special char
-	password = append(password, passwordSpecialChars[rand.IntN(len(passwordSpecialChars)-1)])
-	password = append(password, passwordLetters[rand.IntN(len(passwordLetters)-1)])
-	password = bytes.ToUpper(password)
-	password = append(password, passwordLetters[rand.IntN(len(passwordLetters)-1)])
-	password = append(password, passwordNumbers[rand.IntN(len(passwordNumbers)-1)])
-	allchars := passwordSpecialChars + passwordLetters + passwordNumbers
-	for len(password) < passwordLength {
-		password = append(password, allchars[rand.IntN(len(allchars)-1)])
-	}
-	rand.Shuffle(len(password), func(i, j int) {
-		password[i], password[j] = password[j], password[i]
-	})
-	return string(password)
 }
