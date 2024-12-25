@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -44,8 +43,6 @@ import (
 const (
 	conditionAvailable   = "Available"
 	redisFinalizer       = "redis.yazio.com"
-	redisPortName        = "redis"
-	redisPort            = 6379
 	redisImage           = "bitnami/redis"
 	defaultMemoryRequest = "512Mi"
 	defaultCpuRequest    = "100m"
@@ -196,25 +193,16 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 		return err
 	}
 
-	//Master service
-	if err = r.createOrUpdateMasterService(ctx, redis); err != nil {
-		return err
-	}
-	//Replicas service
-	if err = r.createOrUpdateReplicasService(ctx, redis); err != nil {
-		return err
-	}
-	//Headless service
-	if err = r.createOrUpdateHeadlessService(ctx, redis); err != nil {
-		return err
-	}
-
 	//Secret
 	secretReconciler := reconcilers.NewSecretReconciler(r.Client, r.Scheme)
 	if err = secretReconciler.Reconcile(ctx, redis); err != nil {
 		return err
 	}
 
+	svcReconciler := reconcilers.NewServiceReconciler(&r.Client, r.Scheme)
+	if err = svcReconciler.Reconcile(ctx, redis); err != nil {
+		return err
+	}
 	//ConfigMaps
 	if err = r.createOrUpdateConfigMaps(ctx, redis); err != nil {
 		return err
@@ -229,58 +217,6 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 		return err
 	}
 	return nil
-}
-
-func (r *RedisReconciler) createOrUpdateMasterService(ctx context.Context, redis *cachev1alpha1.Redis) error {
-	labels := util.GetLabels(redis, masterLabels)
-	svcName := fmt.Sprintf("%s-master", redis.Name)
-	svc := generateRedisService(labels, svcName, redis.Namespace)
-
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
-		return controllerutil.SetControllerReference(redis, svc, r.Scheme)
-	})
-	return err
-}
-
-func (r *RedisReconciler) createOrUpdateReplicasService(ctx context.Context, redis *cachev1alpha1.Redis) error {
-	labels := util.GetLabels(redis, replicaLabels)
-	svcName := fmt.Sprintf("%s-replicas", redis.Name)
-	svc := generateRedisService(labels, svcName, redis.Namespace)
-
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
-		return controllerutil.SetControllerReference(redis, svc, r.Scheme)
-	})
-	return err
-}
-
-func (r *RedisReconciler) createOrUpdateHeadlessService(ctx context.Context, redis *cachev1alpha1.Redis) error {
-	svcName := fmt.Sprintf("%s-headless", redis.Name)
-	svc := generateRedisService(util.GetLabels(redis, nil), svcName, redis.Namespace)
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
-		return controllerutil.SetControllerReference(redis, svc, r.Scheme)
-	})
-	return err
-}
-
-func generateRedisService(labels map[string]string, name string, namespace string) *corev1.Service {
-	return &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-			Labels:    labels,
-		},
-		Spec: corev1.ServiceSpec{
-			Type: "ClusterIP",
-			Ports: []corev1.ServicePort{
-				{
-					Name:       "tcp-redis",
-					Port:       redisPort,
-					TargetPort: intstr.FromString(redisPortName),
-				},
-			},
-			Selector: labels,
-		},
-	}
 }
 
 func (r *RedisReconciler) createOrUpdateMasterSS(ctx context.Context, redis *cachev1alpha1.Redis) error {
@@ -338,13 +274,13 @@ func (r *RedisReconciler) createOrUpdateMasterSS(ctx context.Context, redis *cac
 								},
 								{
 									Name:  "REDIS_PORT",
-									Value: strconv.Itoa(redisPort),
+									Value: strconv.Itoa(reconcilers.RedisPort),
 								},
 							},
 							Ports: []corev1.ContainerPort{
 								{
 									Name:          "redis",
-									ContainerPort: redisPort,
+									ContainerPort: reconcilers.RedisPort,
 								},
 							},
 							VolumeMounts: []corev1.VolumeMount{
@@ -480,7 +416,7 @@ func (r *RedisReconciler) createOrUpdateReplicasSS(ctx context.Context, redis *c
 								},
 								{
 									Name:  "REDIS_PORT",
-									Value: strconv.Itoa(redisPort),
+									Value: strconv.Itoa(reconcilers.RedisPort),
 								},
 								{
 									Name:  "HEADLESS_SERVICE",
@@ -490,7 +426,7 @@ func (r *RedisReconciler) createOrUpdateReplicasSS(ctx context.Context, redis *c
 							Ports: []corev1.ContainerPort{
 								{
 									Name:          "redis",
-									ContainerPort: redisPort,
+									ContainerPort: reconcilers.RedisPort,
 								},
 							},
 							VolumeMounts: []corev1.VolumeMount{

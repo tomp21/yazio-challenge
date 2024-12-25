@@ -9,6 +9,14 @@ var baseLabels = map[string]string{
 	"app.kubernetes.io/name":       "redis",
 }
 
+var MasterLabels = map[string]string{
+	"app.kubernetes.io/component": "master",
+}
+
+var ReplicaLabels = map[string]string{
+	"app.kubernetes.io/component": "replica",
+}
+
 func GetLabels(redis *cachev1alpha1.Redis, extra map[string]string) map[string]string {
 	labels := make(map[string]string)
 	for k, v := range baseLabels {
