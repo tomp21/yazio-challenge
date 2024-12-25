@@ -41,6 +41,7 @@ import (
 
 	cachev1alpha1 "github.com/tomp21/yazio-challenge/api/v1alpha1"
 	"github.com/tomp21/yazio-challenge/internal/controller/reconcilers"
+	"github.com/tomp21/yazio-challenge/internal/util"
 )
 
 const (
@@ -59,16 +60,11 @@ const (
 	defaultMemoryLimit     = "512Mi"
 )
 
-var BaseLabels = map[string]string{
-	"app.kubernetes.io/managed-by": "redis-operator",
-	"app.kubernetes.io/name":       "redis",
-}
-
-var MasterLabels = map[string]string{
+var masterLabels = map[string]string{
 	"app.kubernetes.io/component": "master",
 }
 
-var ReplicaLabels = map[string]string{
+var replicaLabels = map[string]string{
 	"app.kubernetes.io/component": "replica",
 }
 
@@ -229,7 +225,7 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 }
 
 func (r *RedisReconciler) createOrUpdateMasterService(ctx context.Context, redis *cachev1alpha1.Redis) error {
-	labels := getLabels(redis, MasterLabels)
+	labels := util.GetLabels(redis, masterLabels)
 	svcName := fmt.Sprintf("%s-master", redis.Name)
 	svc := generateRedisService(labels, svcName, redis.Namespace)
 
@@ -240,7 +236,7 @@ func (r *RedisReconciler) createOrUpdateMasterService(ctx context.Context, redis
 }
 
 func (r *RedisReconciler) createOrUpdateReplicasService(ctx context.Context, redis *cachev1alpha1.Redis) error {
-	labels := getLabels(redis, ReplicaLabels)
+	labels := util.GetLabels(redis, replicaLabels)
 	svcName := fmt.Sprintf("%s-replicas", redis.Name)
 	svc := generateRedisService(labels, svcName, redis.Namespace)
 
@@ -252,26 +248,11 @@ func (r *RedisReconciler) createOrUpdateReplicasService(ctx context.Context, red
 
 func (r *RedisReconciler) createOrUpdateHeadlessService(ctx context.Context, redis *cachev1alpha1.Redis) error {
 	svcName := fmt.Sprintf("%s-headless", redis.Name)
-	svc := generateRedisService(getLabels(redis, nil), svcName, redis.Namespace)
+	svc := generateRedisService(util.GetLabels(redis, nil), svcName, redis.Namespace)
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
 		return controllerutil.SetControllerReference(redis, svc, r.Scheme)
 	})
 	return err
-}
-
-func getLabels(redis *cachev1alpha1.Redis, extra map[string]string) map[string]string {
-	labels := make(map[string]string)
-	for k, v := range BaseLabels {
-		labels[k] = v
-	}
-	// this label helps us differentiate and avoid collisions on label selectors with other hypothetical redises in the same ns
-	labels["app.kubernetes.io/instance"] = redis.Name
-	if extra != nil {
-		for k, v := range extra {
-			labels[k] = v
-		}
-	}
-	return labels
 }
 
 func generateRedisService(labels map[string]string, name string, namespace string) *corev1.Service {
@@ -301,7 +282,7 @@ func (r *RedisReconciler) manageSecret(ctx context.Context, redis *cachev1alpha1
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      redis.Name,
 			Namespace: redis.Namespace,
-			Labels:    getLabels(redis, nil),
+			Labels:    util.GetLabels(redis, nil),
 		},
 	}
 	namespacedName := types.NamespacedName{
@@ -329,7 +310,7 @@ func (r *RedisReconciler) createOrUpdateMasterSS(ctx context.Context, redis *cac
 	if err != nil {
 		return err
 	}
-	labels := getLabels(redis, MasterLabels)
+	labels := util.GetLabels(redis, masterLabels)
 	imageFullName := fmt.Sprintf("%s:%s", redisImage, redis.Spec.Version)
 	// Missing
 	// - Security context
@@ -438,7 +419,7 @@ func (r *RedisReconciler) createOrUpdateMasterSS(ctx context.Context, redis *cac
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:   fmt.Sprintf("%s-data", redis.Name),
-					Labels: getLabels(redis, nil),
+					Labels: util.GetLabels(redis, nil),
 				},
 				Spec: corev1.PersistentVolumeClaimSpec{
 					AccessModes: []corev1.PersistentVolumeAccessMode{
@@ -467,7 +448,7 @@ func (r *RedisReconciler) createOrUpdateReplicasSS(ctx context.Context, redis *c
 	if err != nil {
 		return err
 	}
-	labels := getLabels(redis, MasterLabels)
+	labels := util.GetLabels(redis, masterLabels)
 	imageFullName := fmt.Sprintf("%s:%s", redisImage, redis.Spec.Version)
 	// Missing
 	// - Security context
@@ -585,7 +566,7 @@ func (r *RedisReconciler) createOrUpdateReplicasSS(ctx context.Context, redis *c
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:   fmt.Sprintf("%s-data", redis.Name),
-					Labels: getLabels(redis, nil),
+					Labels: util.GetLabels(redis, nil),
 				},
 				Spec: corev1.PersistentVolumeClaimSpec{
 					AccessModes: []corev1.PersistentVolumeAccessMode{
@@ -610,7 +591,7 @@ func (r *RedisReconciler) createOrUpdateConfigMaps(ctx context.Context, redis *c
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "start-scripts",
 			Namespace: redis.Namespace,
-			Labels:    getLabels(redis, nil),
+			Labels:    util.GetLabels(redis, nil),
 		},
 		Data: map[string]string{
 			"start-master.sh":  masterStartScript,
@@ -628,7 +609,7 @@ func (r *RedisReconciler) createOrUpdateConfigMaps(ctx context.Context, redis *c
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "redis-conf",
 			Namespace: redis.Namespace,
-			Labels:    getLabels(redis, nil),
+			Labels:    util.GetLabels(redis, nil),
 		},
 		Data: map[string]string{
 			"redis.conf":   redisAllConf,
