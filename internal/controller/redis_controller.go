@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	cachev1alpha1 "github.com/tomp21/yazio-challenge/api/v1alpha1"
+	"github.com/tomp21/yazio-challenge/internal/controller/reconcilers"
 )
 
 const (
@@ -187,7 +188,8 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 	// - PDBs
 
 	//SA
-	err := r.createOrUpdateServiceAccount(ctx, redis)
+	saReconciler := reconcilers.NewServiceAccountReconciler(r.Client)
+	err := saReconciler.Reconcile(ctx, redis)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -224,20 +226,6 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
-}
-
-func (r *RedisReconciler) createOrUpdateServiceAccount(ctx context.Context, redis *cachev1alpha1.Redis) error {
-	sa := &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      redis.Name,
-			Namespace: redis.Namespace,
-			Labels:    getLabels(redis, nil),
-		},
-	}
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, sa, func() error {
-		return controllerutil.SetControllerReference(redis, sa, r.Scheme)
-	})
-	return err
 }
 
 func (r *RedisReconciler) createOrUpdateMasterService(ctx context.Context, redis *cachev1alpha1.Redis) error {
