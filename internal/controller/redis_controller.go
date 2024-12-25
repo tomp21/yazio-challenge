@@ -125,7 +125,7 @@ func (r *RedisReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// If the Status of the CR is not set, this means this reconcile is the first one, therefore we update the status subresource to be unknown, and we retrieve the full CR again to ensure we have the latest object
 	if redis.Status.Conditions == nil || len(redis.Status.Conditions) == 0 {
 		meta.SetStatusCondition(&redis.Status.Conditions, metav1.Condition{Type: conditionAvailable, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
-		if err = r.Update(ctx, redis); err != nil {
+		if err = r.Status().Update(ctx, redis); err != nil {
 			log.Error(err, "Failed to update redis resource")
 			return ctrl.Result{}, err
 		}
@@ -158,7 +158,7 @@ func (r *RedisReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	// Once all operations are done, we set the Available condition to True
 	meta.SetStatusCondition(&redis.Status.Conditions, metav1.Condition{Type: conditionAvailable, Status: metav1.ConditionTrue, Reason: "Reconciled", Message: "Reconciliation finished"})
-	if err = r.Update(ctx, redis); err != nil {
+	if err = r.Status().Update(ctx, redis); err != nil {
 		log.Error(err, "Failed to set status condition for redis resource")
 		return ctrl.Result{}, err
 	}

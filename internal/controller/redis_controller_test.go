@@ -82,9 +82,13 @@ var _ = Describe("Redis Controller", func() {
 			})
 			redis := &cachev1alpha1.Redis{}
 			getError := k8sClient.Get(ctx, typeNamespacedName, redis)
+			conditionAvailable := metav1.Condition{Type: conditionAvailable, Status: metav1.ConditionTrue, Reason: "Reconciled", Message: "Reconciliation finished"}
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(getError).NotTo(HaveOccurred())
+			Expect(redis.Status.Conditions[0].Type).To(Equal(conditionAvailable.Type))
+			Expect(redis.Status.Conditions[0].Status).To(Equal(conditionAvailable.Status))
+
 		})
 	})
 })
