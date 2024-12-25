@@ -53,6 +53,9 @@ const (
 	passwordLength         = 12
 	redisImage             = "bitnami/redis"
 	redisPasswordSecretKey = "redis-password"
+	defaultMemoryRequest   = "512Mi"
+	defaultCpuRequest      = "100m"
+	defaultMemoryLimit     = "512Mi"
 )
 
 var BaseLabels = map[string]string{
@@ -407,6 +410,7 @@ func (r *RedisReconciler) createOrUpdateMasterSS(ctx context.Context, redis *cac
 									MountPath: "/data",
 								},
 							},
+							Resources: getResources(),
 						},
 					},
 					Volumes: []corev1.Volume{
@@ -552,6 +556,7 @@ func (r *RedisReconciler) createOrUpdateReplicasSS(ctx context.Context, redis *c
 									MountPath: "/data",
 								},
 							},
+							Resources: getResources(),
 						},
 					},
 					Volumes: []corev1.Volume{
@@ -653,6 +658,19 @@ func (r *RedisReconciler) createOrUpdateConfigMaps(ctx context.Context, redis *c
 	}
 
 	return nil
+}
+
+// Making this a method in case this needs to be calculated in some other way in the future
+func getResources() corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceMemory: resource.MustParse(defaultMemoryRequest),
+			corev1.ResourceCPU:    resource.MustParse(defaultCpuRequest),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceMemory: resource.MustParse(defaultMemoryLimit),
+		},
+	}
 }
 
 func generateSecureRedisPassword() string {
