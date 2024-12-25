@@ -3,6 +3,7 @@ package reconcilers
 import (
 	"context"
 	cachev1alpha1 "github.com/tomp21/yazio-challenge/api/v1alpha1"
+	"github.com/tomp21/yazio-challenge/internal/util"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -11,10 +12,11 @@ import (
 )
 
 type ServiceAccountReconciler struct {
-	client client.Client
+	client *client.Client
+	scheme *runtime.Scheme
 }
 
-func NewServiceAccountReconciler(client client.Client) *ServiceAccountReconciler {
+func NewServiceAccountReconciler(client *client.Client, scheme *runtime.Scheme) *ServiceAccountReconciler {
 	return &ServiceAccountReconciler{
 		client: client,
 	}
@@ -32,8 +34,8 @@ func (r *ServiceAccountReconciler) createOrUpdateServiceAccount(ctx context.Cont
 			Namespace: redis.Namespace,
 		},
 	}
-	_, err := controllerutil.CreateOrUpdate(ctx, r.client, sa, func() error {
-		sa.GetObjectMeta().SetLabels()
+	_, err := controllerutil.CreateOrUpdate(ctx, *r.client, sa, func() error {
+		sa.GetObjectMeta().SetLabels(util.GetLabels(redis, nil))
 		return controllerutil.SetControllerReference(redis, sa, scheme)
 	})
 	return err

@@ -184,7 +184,7 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 	// - PDBs
 
 	//SA
-	saReconciler := reconcilers.NewServiceAccountReconciler(r.Client)
+	saReconciler := reconcilers.NewServiceAccountReconciler(&r.Client, r.Scheme)
 	err := saReconciler.Reconcile(ctx, redis)
 	if err != nil {
 		return ctrl.Result{}, err
