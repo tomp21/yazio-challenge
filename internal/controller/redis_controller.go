@@ -145,11 +145,25 @@ func (r *RedisReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	// Check if the resource has a deletion timestamp, which is the way of marking an object to be deleted
 	if redis.ObjectMeta.GetDeletionTimestamp() != nil {
-		return r.handleFinalizer(ctx, redis)
+		if err = r.handleFinalizer(ctx, redis); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	// After making sure we have something to work on and it is not already marked for deletion, we can proceed to create or update it
-	return r.CreateOrUpdateRedis(ctx, redis)
+	err = r.CreateOrUpdateRedis(ctx, redis)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Once all operations are done, we set the Available condition to True
+	meta.SetStatusCondition(&redis.Status.Conditions, metav1.Condition{Type: conditionAvailable, Status: metav1.ConditionTrue, Reason: "Reconciled", Message: "Reconciliation finished"})
+	if err = r.Update(ctx, redis); err != nil {
+		log.Error(err, "Failed to set status condition for redis resource")
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -167,17 +181,17 @@ func (r *RedisReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // Non-boilerplate functions
 
 // Handles removal of finalizer, to be triggered on deletion, and if extra events need to be triggered on deletion, this is where to do so
-func (r *RedisReconciler) handleFinalizer(ctx context.Context, redis *cachev1alpha1.Redis) (ctrl.Result, error) {
+func (r *RedisReconciler) handleFinalizer(ctx context.Context, redis *cachev1alpha1.Redis) error {
 	log.Log.Info(fmt.Sprintf("Deleting resource %v/%v", redis.Namespace, redis.Name))
 	controllerutil.RemoveFinalizer(redis, redisFinalizer)
 	err := r.Update(ctx, redis)
 	if err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
-	return ctrl.Result{}, nil
+	return nil
 }
 
-func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev1alpha1.Redis) (ctrl.Result, error) {
+func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev1alpha1.Redis) error {
 	// For the sake of minimalism on this exercise, i'm leaving out (initially at least)
 	// - NetworkPolicy
 	// - PDBs
@@ -185,41 +199,41 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 	//SA
 	err := r.createOrUpdateServiceAccount(ctx, redis)
 	if err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 
 	//Master service
 	if err = r.createOrUpdateMasterService(ctx, redis); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 	//Replicas service
 	if err = r.createOrUpdateReplicasService(ctx, redis); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 	//Headless service
 	if err = r.createOrUpdateHeadlessService(ctx, redis); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 
 	//Secret
 	if err = r.manageSecret(ctx, redis); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 
 	//ConfigMaps
 	if err = r.createOrUpdateConfigMaps(ctx, redis); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 
 	//Master statefulset
 	if err = r.createOrUpdateMasterSS(ctx, redis); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 	//Replicas statefulset
 	if err = r.createOrUpdateReplicasSS(ctx, redis); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
-	return ctrl.Result{}, nil
+	return nil
 }
 
 func (r *RedisReconciler) createOrUpdateServiceAccount(ctx context.Context, redis *cachev1alpha1.Redis) error {
