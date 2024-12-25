@@ -19,15 +19,12 @@ type ServiceAccountReconciler struct {
 func NewServiceAccountReconciler(client *client.Client, scheme *runtime.Scheme) *ServiceAccountReconciler {
 	return &ServiceAccountReconciler{
 		client: client,
+		scheme: scheme,
 	}
 }
 
 func (r *ServiceAccountReconciler) Reconcile(ctx context.Context, redis *cachev1alpha1.Redis) error {
 
-	return nil
-}
-
-func (r *ServiceAccountReconciler) createOrUpdateServiceAccount(ctx context.Context, redis *cachev1alpha1.Redis, scheme *runtime.Scheme) error {
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      redis.Name,
@@ -36,7 +33,7 @@ func (r *ServiceAccountReconciler) createOrUpdateServiceAccount(ctx context.Cont
 	}
 	_, err := controllerutil.CreateOrUpdate(ctx, *r.client, sa, func() error {
 		sa.GetObjectMeta().SetLabels(util.GetLabels(redis, nil))
-		return controllerutil.SetControllerReference(redis, sa, scheme)
+		return controllerutil.SetControllerReference(redis, sa, r.scheme)
 	})
 	return err
 }

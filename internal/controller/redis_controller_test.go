@@ -39,7 +39,7 @@ var _ = Describe("Redis Controller", func() {
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Namespace: "default",
 		}
 		redis := &cachev1alpha1.Redis{}
 
