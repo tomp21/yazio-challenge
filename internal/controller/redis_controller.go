@@ -18,15 +18,12 @@ package controller
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
-	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
@@ -37,7 +34,6 @@ import (
 
 	cachev1alpha1 "github.com/tomp21/yazio-challenge/api/v1alpha1"
 	"github.com/tomp21/yazio-challenge/internal/controller/reconcilers"
-	"github.com/tomp21/yazio-challenge/internal/util"
 )
 
 const (
@@ -53,21 +49,6 @@ var masterLabels = map[string]string{
 var replicaLabels = map[string]string{
 	"app.kubernetes.io/component": "replica",
 }
-
-//go:embed configmaps/scripts/start-master.sh
-var masterStartScript string
-
-//go:embed configmaps/scripts/start-replica.sh
-var replicaStartScript string
-
-//go:embed configmaps/conf/redis.conf
-var redisAllConf string
-
-//go:embed configmaps/conf/master.conf
-var redisMasterConf string
-
-//go:embed configmaps/conf/master.conf
-var redisReplicaConf string
 
 // RedisReconciler reconciles a Redis object
 type RedisReconciler struct {
@@ -210,7 +191,8 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 	}
 
 	//ConfigMaps
-	if err = r.createOrUpdateConfigMaps(ctx, redis); err != nil {
+	cmReconciler := reconcilers.NewConfigMapReconciler(&r.Client, r.Scheme)
+	if err = cmReconciler.Reconcile(ctx, redis); err != nil {
 		return err
 	}
 
@@ -218,49 +200,5 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 	if err = statefulSetReconciler.Reconcile(ctx, redis); err != nil {
 		return err
 	}
-	return nil
-}
-
-func (r *RedisReconciler) createOrUpdateConfigMaps(ctx context.Context, redis *cachev1alpha1.Redis) error {
-
-	cmStartScripts := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "start-scripts",
-			Namespace: redis.Namespace,
-			Labels:    util.GetLabels(redis, nil),
-		},
-		Data: map[string]string{
-			"start-master.sh":  masterStartScript,
-			"start-replica.sh": replicaStartScript,
-		},
-	}
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, cmStartScripts, func() error {
-		return controllerutil.SetControllerReference(redis, cmStartScripts, r.Scheme)
-	})
-	if err != nil {
-		return err
-	}
-
-	cmConfig := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "redis-conf",
-			Namespace: redis.Namespace,
-			Labels:    util.GetLabels(redis, nil),
-		},
-		Data: map[string]string{
-			"redis.conf":   redisAllConf,
-			"master.conf":  redisMasterConf,
-			"replica.conf": redisReplicaConf,
-		},
-	}
-
-	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, cmConfig, func() error {
-		return controllerutil.SetControllerReference(redis, cmConfig, r.Scheme)
-	})
-
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
