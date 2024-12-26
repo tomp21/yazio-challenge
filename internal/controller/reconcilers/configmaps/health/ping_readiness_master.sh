@@ -6,7 +6,7 @@ response=$(
   timeout -s 15 $1 \
   redis-cli \
     -h $REDIS_MASTER_HOST \
-    -p $REDIS_MASTER_PORT_NUMBER \
+    -p $REDIS_PORT \
     ping
 )
 if [ "$?" -eq "124" ]; then

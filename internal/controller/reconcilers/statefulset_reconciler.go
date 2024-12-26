@@ -215,6 +215,32 @@ func getMasterContainers(name, image string) []corev1.Container {
 					Name:      fmt.Sprintf("%s-data", name),
 					MountPath: "/data",
 				},
+				{
+					Name:      "health",
+					MountPath: "/health",
+				},
+			},
+			LivenessProbe: &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					Exec: &corev1.ExecAction{
+						Command: []string{
+							"sh",
+							"-c",
+							"/health/ping_liveness_local.sh 5",
+						},
+					},
+				},
+			},
+			ReadinessProbe: &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					Exec: &corev1.ExecAction{
+						Command: []string{
+							"sh",
+							"-c",
+							"/health/ping_readiness_local.sh 1",
+						},
+					},
+				},
 			},
 			Resources: getResources(),
 		},
@@ -241,6 +267,17 @@ func getReplicaContainers(name, image string) []corev1.Container {
 					},
 				},
 				{
+					Name: "REDIS_MASTER_PASSWORD",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: name,
+							},
+							Key: PasswordSecretKey,
+						},
+					},
+				},
+				{
 					Name:  "REDIS_REPLICATION_MODE",
 					Value: "replica",
 				},
@@ -255,6 +292,10 @@ func getReplicaContainers(name, image string) []corev1.Container {
 				{
 					Name:  "HEADLESS_SERVICE",
 					Value: fmt.Sprintf("%s-headless", name),
+				},
+				{
+					Name:  "ALLOW_EMPLTY_PASSWORD",
+					Value: "no",
 				},
 			},
 			Ports: []corev1.ContainerPort{
@@ -274,6 +315,32 @@ func getReplicaContainers(name, image string) []corev1.Container {
 				{
 					Name:      fmt.Sprintf("%s-data", name),
 					MountPath: "/data",
+				},
+				{
+					Name:      "health",
+					MountPath: "/health",
+				},
+			},
+			LivenessProbe: &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					Exec: &corev1.ExecAction{
+						Command: []string{
+							"sh",
+							"-c",
+							"/health/ping_liveness_local_and_master.sh 5",
+						},
+					},
+				},
+			},
+			ReadinessProbe: &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					Exec: &corev1.ExecAction{
+						Command: []string{
+							"sh",
+							"-c",
+							"/health/ping_readiness_local_and_master.sh 1",
+						},
+					},
 				},
 			},
 			Resources: getResources(),
@@ -325,6 +392,16 @@ func getVolumes() []corev1.Volume {
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{
 						Name: "redis-conf",
+					},
+					DefaultMode: &defaultMode,
+				},
+			},
+		}, {
+			Name: "health",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: "redis-health",
 					},
 					DefaultMode: &defaultMode,
 				},
