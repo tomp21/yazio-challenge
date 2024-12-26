@@ -286,6 +286,10 @@ func getReplicaContainers(name, image string) []corev1.Container {
 					Value: fmt.Sprintf("%s-master", name),
 				},
 				{
+					Name:  "REDIS_MASTER_PORT_NUMBER",
+					Value: strconv.Itoa(RedisPort),
+				},
+				{
 					Name:  "REDIS_PORT",
 					Value: strconv.Itoa(RedisPort),
 				},
