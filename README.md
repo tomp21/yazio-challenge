@@ -90,11 +90,17 @@ kubectl delete redis <whichever name you set to it>
 ```
 ## Development workflow
 
+### While developing
+
 In order to make it easier to iterate locally, a make target has been added
 ```sh
 make kind-refresh
 ```
 This target will rebuild the docker image, load it into the default kind cluster, regenerate the manifests, deploy them and manually delete the preexisting controller pod (this last step was not strictly necessary)
+
+### Running tests
+(EnvTest)[https://book.kubebuilder.io/reference/envtest] needs to be set up in order for our tests to have the binaries it will be using
+After EnvTest is set up and runnning appropiately, `make test` will run the test suites
 
 ## Project Distribution
 
