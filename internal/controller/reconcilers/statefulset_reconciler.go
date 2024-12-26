@@ -146,7 +146,7 @@ func generateReplicaStatefulSet(ss appsv1.StatefulSet, redis *cachev1alpha1.Redi
 	}
 	ss.Spec.Template.ObjectMeta.SetLabels(labels)
 	ss.Spec.Template.Spec.Containers = getReplicaContainers(redis.Name, imageFullName)
-	ss.Spec.Template.Spec.Volumes = getVolumes()
+	ss.Spec.Template.Spec.Volumes = getVolumes(redis.Name)
 	ss.Spec.VolumeClaimTemplates = getVolumeClaimTemplates(redis, util.GetLabels(redis, nil))
 	return ss
 }
@@ -164,7 +164,7 @@ func generateMasterStatefulSet(ss appsv1.StatefulSet, redis *cachev1alpha1.Redis
 	}
 	ss.Spec.Template.ObjectMeta.SetLabels(labels)
 	ss.Spec.Template.Spec.Containers = getMasterContainers(redis.Name, imageFullName)
-	ss.Spec.Template.Spec.Volumes = getVolumes()
+	ss.Spec.Template.Spec.Volumes = getVolumes(redis.Name)
 	ss.Spec.VolumeClaimTemplates = getVolumeClaimTemplates(redis, util.GetLabels(redis, nil))
 	return ss
 }
@@ -377,7 +377,7 @@ func getVolumeClaimTemplates(redis *cachev1alpha1.Redis, labels map[string]strin
 	}
 }
 
-func getVolumes() []corev1.Volume {
+func getVolumes(instanceName string) []corev1.Volume {
 	defaultMode := int32(0755)
 	return []corev1.Volume{
 		{
@@ -385,7 +385,7 @@ func getVolumes() []corev1.Volume {
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: "start-scripts",
+						Name: fmt.Sprintf("%s-start-scripts", instanceName),
 					},
 					DefaultMode: &defaultMode,
 				},
@@ -395,7 +395,7 @@ func getVolumes() []corev1.Volume {
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: "redis-conf",
+						Name: fmt.Sprintf("%s-conf", instanceName),
 					},
 					DefaultMode: &defaultMode,
 				},
@@ -405,7 +405,7 @@ func getVolumes() []corev1.Volume {
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: "redis-health",
+						Name: fmt.Sprintf("%s-health", instanceName),
 					},
 					DefaultMode: &defaultMode,
 				},

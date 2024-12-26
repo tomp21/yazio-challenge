@@ -2,8 +2,10 @@ package reconcilers
 
 import (
 	_ "embed"
+	"fmt"
 
 	"context"
+
 	cachev1alpha1 "github.com/tomp21/yazio-challenge/api/v1alpha1"
 	"github.com/tomp21/yazio-challenge/internal/util"
 	corev1 "k8s.io/api/core/v1"
@@ -77,7 +79,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, redis *cachev1alpha
 func (r *ConfigMapReconciler) ReconcileStartScripts(ctx context.Context, redis *cachev1alpha1.Redis) error {
 	cmStartScripts := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "start-scripts",
+			Name:      fmt.Sprintf("%s-start-scripts", redis.Name),
 			Namespace: redis.Namespace,
 			Labels:    util.GetLabels(redis, nil),
 		},
@@ -96,7 +98,7 @@ func (r *ConfigMapReconciler) ReconcileStartScripts(ctx context.Context, redis *
 func (r *ConfigMapReconciler) ReconcileConfigs(ctx context.Context, redis *cachev1alpha1.Redis) error {
 	cmConfig := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "redis-conf",
+			Name:      fmt.Sprintf("%s-conf", redis.Name),
 			Namespace: redis.Namespace,
 			Labels:    util.GetLabels(redis, nil),
 		},
@@ -116,7 +118,7 @@ func (r *ConfigMapReconciler) ReconcileConfigs(ctx context.Context, redis *cache
 func (r *ConfigMapReconciler) ReconcileHealthScripts(ctx context.Context, redis *cachev1alpha1.Redis) error {
 	cmHealth := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "redis-health",
+			Name:      fmt.Sprintf("%s-health", redis.Name),
 			Namespace: redis.Namespace,
 			Labels:    util.GetLabels(redis, nil),
 		},
