@@ -28,6 +28,24 @@ var redisMasterConf string
 //go:embed configmaps/conf/replica.conf
 var redisReplicaConf string
 
+//go:embed configmaps/health/ping_liveness_local.sh
+var redisLivenessLocal string
+
+//go:embed configmaps/health/ping_readiness_local.sh
+var redisReadinessLocal string
+
+//go:embed configmaps/health/ping_liveness_master.sh
+var redisLivenessMaster string
+
+//go:embed configmaps/health/ping_readiness_master.sh
+var redisReadinessMaster string
+
+//go:embed configmaps/health/ping_liveness_local_and_master.sh
+var redisLivenessLocalMaster string
+
+//go:embed configmaps/health/ping_readiness_local_and_master.sh
+var redisReadinessLocalMaster string
+
 type ConfigMapReconciler struct {
 	client *client.Client
 	scheme *runtime.Scheme
@@ -49,7 +67,11 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, redis *cachev1alpha
 	if err != nil {
 		return err
 	}
-	return nil
+
+	err = r.ReconcileHealthScripts(ctx, redis)
+
+	return err
+
 }
 
 func (r *ConfigMapReconciler) ReconcileStartScripts(ctx context.Context, redis *cachev1alpha1.Redis) error {
@@ -67,10 +89,8 @@ func (r *ConfigMapReconciler) ReconcileStartScripts(ctx context.Context, redis *
 	_, err := controllerutil.CreateOrUpdate(ctx, *r.client, cmStartScripts, func() error {
 		return controllerutil.SetControllerReference(redis, cmStartScripts, r.scheme)
 	})
-	if err != nil {
-		return err
-	}
-	return nil
+
+	return err
 }
 
 func (r *ConfigMapReconciler) ReconcileConfigs(ctx context.Context, redis *cachev1alpha1.Redis) error {
@@ -90,10 +110,29 @@ func (r *ConfigMapReconciler) ReconcileConfigs(ctx context.Context, redis *cache
 	_, err := controllerutil.CreateOrUpdate(ctx, *r.client, cmConfig, func() error {
 		return controllerutil.SetControllerReference(redis, cmConfig, r.scheme)
 	})
+	return err
+}
 
-	if err != nil {
-		return err
+func (r *ConfigMapReconciler) ReconcileHealthScripts(ctx context.Context, redis *cachev1alpha1.Redis) error {
+	cmHealth := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "redis-health",
+			Namespace: redis.Namespace,
+			Labels:    util.GetLabels(redis, nil),
+		},
+		Data: map[string]string{
+			"ping_liveness_local.sh":             redisLivenessLocal,
+			"ping_readiness_local.sh":            redisReadinessLocal,
+			"ping_liveness_master.sh":            redisLivenessMaster,
+			"ping_readiness_master.sh":           redisReadinessMaster,
+			"ping_liveness_local_and_master.sh":  redisLivenessLocalMaster,
+			"ping_readiness_local_and_master.sh": redisReadinessLocalMaster,
+		},
 	}
 
-	return nil
+	_, err := controllerutil.CreateOrUpdate(ctx, *r.client, cmHealth, func() error {
+		return controllerutil.SetControllerReference(redis, cmHealth, r.scheme)
+	})
+
+	return err
 }
