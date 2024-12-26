@@ -137,7 +137,6 @@ func getResources() corev1.ResourceRequirements {
 func generateReplicaStatefulSet(ss appsv1.StatefulSet, redis *cachev1alpha1.Redis) appsv1.StatefulSet {
 	imageFullName := fmt.Sprintf("%s:%s", redisImage, redis.Spec.Version)
 	labels := util.GetLabels(redis, util.ReplicaLabels)
-	defaultCMMode := int32(0755)
 	ss.ObjectMeta.SetName(fmt.Sprintf("%s-replica", redis.Name))
 	ss.ObjectMeta.SetNamespace(redis.Namespace)
 	ss.ObjectMeta.SetLabels(labels)
@@ -147,8 +146,8 @@ func generateReplicaStatefulSet(ss appsv1.StatefulSet, redis *cachev1alpha1.Redi
 	}
 	ss.Spec.Template.ObjectMeta.SetLabels(labels)
 	ss.Spec.Template.Spec.Containers = getReplicaContainers(redis.Name, imageFullName)
-	ss.Spec.Template.Spec.Volumes = getVolumes(defaultCMMode)
-	ss.Spec.VolumeClaimTemplates = getVolumeClaimTemplates(redis)
+	ss.Spec.Template.Spec.Volumes = getVolumes()
+	ss.Spec.VolumeClaimTemplates = getVolumeClaimTemplates(redis, util.GetLabels(redis, nil))
 	return ss
 }
 
@@ -156,7 +155,6 @@ func generateMasterStatefulSet(ss appsv1.StatefulSet, redis *cachev1alpha1.Redis
 	imageFullName := fmt.Sprintf("%s:%s", redisImage, redis.Spec.Version)
 	labels := util.GetLabels(redis, util.MasterLabels)
 	masterReplicas := int32(1)
-	defaultCMMode := int32(0755)
 	ss.ObjectMeta.SetName(fmt.Sprintf("%s-master", redis.Name))
 	ss.ObjectMeta.SetNamespace(redis.Namespace)
 	ss.ObjectMeta.SetLabels(labels)
@@ -166,8 +164,8 @@ func generateMasterStatefulSet(ss appsv1.StatefulSet, redis *cachev1alpha1.Redis
 	}
 	ss.Spec.Template.ObjectMeta.SetLabels(labels)
 	ss.Spec.Template.Spec.Containers = getMasterContainers(redis.Name, imageFullName)
-	ss.Spec.Template.Spec.Volumes = getVolumes(defaultCMMode)
-	ss.Spec.VolumeClaimTemplates = getVolumeClaimTemplates(redis)
+	ss.Spec.Template.Spec.Volumes = getVolumes()
+	ss.Spec.VolumeClaimTemplates = getVolumeClaimTemplates(redis, util.GetLabels(redis, nil))
 	return ss
 }
 
@@ -283,7 +281,7 @@ func getReplicaContainers(name, image string) []corev1.Container {
 	}
 }
 
-func getVolumeClaimTemplates(redis *cachev1alpha1.Redis) []corev1.PersistentVolumeClaim {
+func getVolumeClaimTemplates(redis *cachev1alpha1.Redis, labels map[string]string) []corev1.PersistentVolumeClaim {
 	return []corev1.PersistentVolumeClaim{
 		{
 			TypeMeta: metav1.TypeMeta{
@@ -292,7 +290,7 @@ func getVolumeClaimTemplates(redis *cachev1alpha1.Redis) []corev1.PersistentVolu
 			},
 			ObjectMeta: metav1.ObjectMeta{
 				Name:   fmt.Sprintf("%s-data", redis.Name),
-				Labels: util.GetLabels(redis, nil),
+				Labels: labels,
 			},
 			Spec: corev1.PersistentVolumeClaimSpec{
 				AccessModes: []corev1.PersistentVolumeAccessMode{
@@ -308,7 +306,8 @@ func getVolumeClaimTemplates(redis *cachev1alpha1.Redis) []corev1.PersistentVolu
 	}
 }
 
-func getVolumes(defaultCMMode int32) []corev1.Volume {
+func getVolumes() []corev1.Volume {
+	defaultMode := int32(0755)
 	return []corev1.Volume{
 		{
 			Name: "start-scripts",
@@ -317,7 +316,7 @@ func getVolumes(defaultCMMode int32) []corev1.Volume {
 					LocalObjectReference: corev1.LocalObjectReference{
 						Name: "start-scripts",
 					},
-					DefaultMode: &defaultCMMode,
+					DefaultMode: &defaultMode,
 				},
 			},
 		}, {
@@ -327,7 +326,7 @@ func getVolumes(defaultCMMode int32) []corev1.Volume {
 					LocalObjectReference: corev1.LocalObjectReference{
 						Name: "redis-conf",
 					},
-					DefaultMode: &defaultCMMode,
+					DefaultMode: &defaultMode,
 				},
 			},
 		},
