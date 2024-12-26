@@ -30,7 +30,7 @@ func NewServiceReconciler(client *client.Client, scheme *runtime.Scheme) *Servic
 	}
 }
 
-func (r ServiceReconciler) Reconcile(ctx context.Context, redis *cachev1alpha1.Redis) error {
+func (r *ServiceReconciler) Reconcile(ctx context.Context, redis *cachev1alpha1.Redis) error {
 	//master svc
 	masterSvcName := fmt.Sprintf("%s-master", redis.Name)
 	err := r.createOrUpdateService(ctx, masterSvcName, redis)
@@ -51,7 +51,7 @@ func (r ServiceReconciler) Reconcile(ctx context.Context, redis *cachev1alpha1.R
 	return nil
 }
 
-func (r ServiceReconciler) createOrUpdateService(ctx context.Context, svcName string, redis *cachev1alpha1.Redis) error {
+func (r *ServiceReconciler) createOrUpdateService(ctx context.Context, svcName string, redis *cachev1alpha1.Redis) error {
 	labels := util.GetLabels(redis, util.MasterLabels)
 	svc := generateService(labels, svcName, redis.Namespace)
 

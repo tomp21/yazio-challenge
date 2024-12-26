@@ -41,12 +41,9 @@ import (
 )
 
 const (
-	conditionAvailable   = "Available"
-	redisFinalizer       = "redis.yazio.com"
-	redisImage           = "bitnami/redis"
-	defaultMemoryRequest = "512Mi"
-	defaultCpuRequest    = "100m"
-	defaultMemoryLimit   = "512Mi"
+	conditionAvailable = "Available"
+	redisFinalizer     = "redis.yazio.com"
+	redisImage         = "bitnami/redis"
 )
 
 var masterLabels = map[string]string{
@@ -126,9 +123,13 @@ func (r *RedisReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// AddFinalizer will return true if the redis object didn't have this finalizer already, in which case we should add it
-	if controllerutil.AddFinalizer(redis, redisFinalizer) {
+	if !controllerutil.ContainsFinalizer(redis, redisFinalizer) {
+		if ok := controllerutil.AddFinalizer(redis, redisFinalizer); !ok {
+			log.Error(err, "Failed to add finalizer into the custom resource")
+			return ctrl.Result{Requeue: true}, nil
+		}
 		if err = r.Update(ctx, redis); err != nil {
-			log.Error(err, "Could not update finalizers")
+			log.Error(err, "Failed to update custom resource to add finalizer")
 			return ctrl.Result{}, err
 		}
 	}
@@ -147,6 +148,10 @@ func (r *RedisReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Once all operations are done, we set the Available condition to True
+	if err = r.Get(ctx, req.NamespacedName, redis); err != nil {
+		log.Error(err, "Failed to retrieve redis resource")
+		return ctrl.Result{}, err
+	}
 	meta.SetStatusCondition(&redis.Status.Conditions, metav1.Condition{Type: conditionAvailable, Status: metav1.ConditionTrue, Reason: "Reconciled", Message: "Reconciliation finished"})
 	if err = r.Status().Update(ctx, redis); err != nil {
 		log.Error(err, "Failed to set status condition for redis resource")
@@ -203,19 +208,16 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 	if err = svcReconciler.Reconcile(ctx, redis); err != nil {
 		return err
 	}
+
+	statefulSetReconciler := reconcilers.NewStatefulSetReconciler(r.Client, r.Scheme)
+	if err = statefulSetReconciler.Reconcile(ctx, redis); err != nil {
+		return err
+	}
 	//ConfigMaps
 	if err = r.createOrUpdateConfigMaps(ctx, redis); err != nil {
 		return err
 	}
 
-	//Master statefulset
-	if err = r.createOrUpdateMasterSS(ctx, redis); err != nil {
-		return err
-	}
-	//Replicas statefulset
-	if err = r.createOrUpdateReplicasSS(ctx, redis); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -296,7 +298,7 @@ func (r *RedisReconciler) createOrUpdateMasterSS(ctx context.Context, redis *cac
 									MountPath: "/data",
 								},
 							},
-							Resources: getResources(),
+							//							Resources: getResources(),
 						},
 					},
 					Volumes: []corev1.Volume{
@@ -442,7 +444,7 @@ func (r *RedisReconciler) createOrUpdateReplicasSS(ctx context.Context, redis *c
 									MountPath: "/data",
 								},
 							},
-							Resources: getResources(),
+							//							Resources: getResources(),
 						},
 					},
 					Volumes: []corev1.Volume{
@@ -544,17 +546,4 @@ func (r *RedisReconciler) createOrUpdateConfigMaps(ctx context.Context, redis *c
 	}
 
 	return nil
-}
-
-// Making this a method in case this needs to be calculated in some other way in the future
-func getResources() corev1.ResourceRequirements {
-	return corev1.ResourceRequirements{
-		Requests: corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse(defaultMemoryRequest),
-			corev1.ResourceCPU:    resource.MustParse(defaultCpuRequest),
-		},
-		Limits: corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse(defaultMemoryLimit),
-		},
-	}
 }
