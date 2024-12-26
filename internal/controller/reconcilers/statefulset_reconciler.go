@@ -38,8 +38,39 @@ func NewStatefulSetReconciler(client client.Client, scheme *runtime.Scheme) *Sta
 }
 
 func (r *StatefulSetReconciler) Reconcile(ctx context.Context, redis *cachev1alpha1.Redis) error {
+	err := r.handleMasterStatefulSet(ctx, redis)
+	if err != nil {
+		return err
+	}
+	err = r.handleReplicaStatefulSet(ctx, redis)
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
-	return r.handleMasterStatefulSet(ctx, redis)
+func (r *StatefulSetReconciler) handleReplicaStatefulSet(ctx context.Context, redis *cachev1alpha1.Redis) error {
+	statefulSet := &appsv1.StatefulSet{}
+	namespacedName := types.NamespacedName{Name: fmt.Sprintf("%s-replica", redis.Name), Namespace: redis.Namespace}
+	replicaStatefulSet := generateReplicaStatefulSet(*statefulSet, redis)
+	controllerutil.SetOwnerReference(redis, &replicaStatefulSet, r.scheme)
+
+	err := r.Get(ctx, namespacedName, statefulSet)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		if err = r.Create(ctx, &replicaStatefulSet); err != nil {
+			return err
+		}
+
+	} else {
+		err = r.Update(ctx, &replicaStatefulSet)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *StatefulSetReconciler) handleMasterStatefulSet(ctx context.Context, redis *cachev1alpha1.Redis) error {
@@ -58,7 +89,13 @@ func (r *StatefulSetReconciler) handleMasterStatefulSet(ctx context.Context, red
 			return err
 		}
 
+	} else {
+		err = r.Update(ctx, &masterStatefulSet)
+		if err != nil {
+			return err
+		}
 	}
+
 	return nil
 }
 
@@ -95,6 +132,24 @@ func getResources() corev1.ResourceRequirements {
 			corev1.ResourceMemory: resource.MustParse(defaultMemoryLimit),
 		},
 	}
+}
+
+func generateReplicaStatefulSet(ss appsv1.StatefulSet, redis *cachev1alpha1.Redis) appsv1.StatefulSet {
+	imageFullName := fmt.Sprintf("%s:%s", redisImage, redis.Spec.Version)
+	labels := util.GetLabels(redis, util.ReplicaLabels)
+	defaultCMMode := int32(0755)
+	ss.ObjectMeta.SetName(fmt.Sprintf("%s-replica", redis.Name))
+	ss.ObjectMeta.SetNamespace(redis.Namespace)
+	ss.ObjectMeta.SetLabels(labels)
+	ss.Spec.Replicas = &redis.Spec.Replicas
+	ss.Spec.Selector = &metav1.LabelSelector{
+		MatchLabels: labels,
+	}
+	ss.Spec.Template.ObjectMeta.SetLabels(labels)
+	ss.Spec.Template.Spec.Containers = getReplicaContainers(redis.Name, imageFullName)
+	ss.Spec.Template.Spec.Volumes = getVolumes(defaultCMMode)
+	ss.Spec.VolumeClaimTemplates = getVolumeClaimTemplates(redis)
+	return ss
 }
 
 func generateMasterStatefulSet(ss appsv1.StatefulSet, redis *cachev1alpha1.Redis) appsv1.StatefulSet {
@@ -142,6 +197,66 @@ func getMasterContainers(name, image string) []corev1.Container {
 				{
 					Name:  "REDIS_PORT",
 					Value: strconv.Itoa(RedisPort),
+				},
+			},
+			Ports: []corev1.ContainerPort{
+				{
+					Name:          "redis",
+					ContainerPort: RedisPort,
+				},
+			},
+			VolumeMounts: []corev1.VolumeMount{
+				{
+					Name:      "start-scripts",
+					MountPath: "/opt/bitnami/scripts/start-scripts",
+				}, {
+					Name:      "redis-conf",
+					MountPath: "/opt/bitnami/redis/mounted-etc",
+				},
+				{
+					Name:      fmt.Sprintf("%s-data", name),
+					MountPath: "/data",
+				},
+			},
+			Resources: getResources(),
+		},
+	}
+}
+
+func getReplicaContainers(name, image string) []corev1.Container {
+	return []corev1.Container{
+		{
+			Name:    "redis",
+			Image:   image,
+			Command: []string{"/bin/bash"},
+			Args:    []string{"-c", "/opt/bitnami/scripts/start-scripts/start-replica.sh"},
+			Env: []corev1.EnvVar{
+				{
+					Name: "REDIS_PASSWORD",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: name,
+							},
+							Key: PasswordSecretKey,
+						},
+					},
+				},
+				{
+					Name:  "REDIS_REPLICATION_MODE",
+					Value: "replica",
+				},
+				{
+					Name:  "REDIS_MASTER_HOST",
+					Value: fmt.Sprintf("%s-master", name),
+				},
+				{
+					Name:  "REDIS_PORT",
+					Value: strconv.Itoa(RedisPort),
+				},
+				{
+					Name:  "HEADLESS_SERVICE",
+					Value: fmt.Sprintf("%s-headless", name),
 				},
 			},
 			Ports: []corev1.ContainerPort{

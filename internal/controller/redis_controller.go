@@ -360,8 +360,6 @@ func (r *RedisReconciler) createOrUpdateMasterSS(ctx context.Context, redis *cac
 
 func (r *RedisReconciler) createOrUpdateReplicasSS(ctx context.Context, redis *cachev1alpha1.Redis) error {
 	replicas := redis.Spec.Replicas
-	fmt.Println("replicas")
-	fmt.Println(replicas)
 	defaultCMMode := int32(0755)
 	volumeStorage, err := resource.ParseQuantity("2Gi")
 	if err != nil {
