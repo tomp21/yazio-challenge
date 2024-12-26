@@ -46,12 +46,6 @@ spec:
           spec:
             description: RedisSpec defines the desired state of Redis
             properties:
-              memory:
-                anyOf:
-                - type: integer
-                - type: string
-                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                x-kubernetes-int-or-string: true
               replicas:
                 format: int32
                 minimum: 1
