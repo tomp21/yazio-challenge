@@ -209,15 +209,15 @@ func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev
 		return err
 	}
 
-	statefulSetReconciler := reconcilers.NewStatefulSetReconciler(r.Client, r.Scheme)
-	if err = statefulSetReconciler.Reconcile(ctx, redis); err != nil {
-		return err
-	}
 	//ConfigMaps
 	if err = r.createOrUpdateConfigMaps(ctx, redis); err != nil {
 		return err
 	}
 
+	statefulSetReconciler := reconcilers.NewStatefulSetReconciler(r.Client, r.Scheme)
+	if err = statefulSetReconciler.Reconcile(ctx, redis); err != nil {
+		return err
+	}
 	return nil
 }
 
