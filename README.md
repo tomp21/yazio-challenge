@@ -10,6 +10,19 @@ This repository holds the code for an operator responsible of managing a Redis s
 - (Bonus) Basic tests
 - (Bonus) Health watch mechanism/self healing capacity
 
+## Example redis manifest
+
+```yaml
+apiVersion: cache.yazio.com/v1alpha1
+kind: Redis
+metadata:
+  name: redis-sample
+spec:
+   replicas: 3 # Replicas will be the amount of replicas of the master, in this case we would have 1 master and 3 replicas in our deployment, master's amount is always 1
+   version: "7.4.1" # Redis version to deploy, this will map directly to the image tag for bitnami/redis, so far only version 7.4.1 was tested, beware that using other versions might not be compatible with the configurations this operator provides to redis 
+   volumeStorage: 2Gi # Storage for the /data volumes mounted into all redis instances, being equal for master and replicas
+```
+
 ## Getting Started
 
 ### Prerequisites
@@ -75,6 +88,19 @@ If you renamed the resource after creation, you will need to delete it referncin
 ```sh
 kubectl delete redis <whichever name you set to it>
 ```
+## Development workflow
+
+### While developing
+
+In order to make it easier to iterate locally, a make target has been added
+```sh
+make kind-refresh
+```
+This target will rebuild the docker image, load it into the default kind cluster, regenerate the manifests, deploy them and manually delete the preexisting controller pod (this last step was not strictly necessary)
+
+### Running tests
+[EnvTest](https://book.kubebuilder.io/reference/envtest) needs to be set up in order for our tests to have the binaries it will be using
+After EnvTest is set up and runnning appropiately, `make test` will run the test suites
 
 ## Project Distribution
 
