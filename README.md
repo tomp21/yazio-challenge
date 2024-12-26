@@ -1,7 +1,7 @@
 # yazio-challenge
 This repository holds the code for an operator responsible of managing a Redis single-master deployment, following the challenge proposed features:
 - Manage Redis instances
-- CRD Definition (Which can be found (here)[config/crd/bases/cache.yazio.com_redis.yaml]
+- CRD Definition (Which can be found [here](config/crd/bases/cache.yazio.com_redis.yaml)
 - Random password generation
 - Secret management
 - Redis deployment (Turned statefulsets due to the application's nature)
