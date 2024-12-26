@@ -76,7 +76,6 @@ type RedisReconciler struct {
 // move the current state of the cluster closer to the desired state.
 func (r *RedisReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
-	fmt.Println("Reconcile triggered")
 	redis := &cachev1alpha1.Redis{}
 
 	err := r.Get(ctx, req.NamespacedName, redis)
@@ -168,7 +167,7 @@ func (r *RedisReconciler) handleFinalizer(ctx context.Context, redis *cachev1alp
 }
 
 func (r *RedisReconciler) CreateOrUpdateRedis(ctx context.Context, redis *cachev1alpha1.Redis) error {
-	// For the sake of minimalism on this exercise, i'm leaving out (initially at least)
+	// For the sake of minimalism on this exercise, i'm leaving out
 	// - NetworkPolicy
 	// - PDBs
 
